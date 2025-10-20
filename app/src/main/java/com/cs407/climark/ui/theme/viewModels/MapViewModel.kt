@@ -4,13 +4,29 @@ package com.cs407.climark.ui.theme.viewModels
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.cs407.climark.data.weather.WeatherApi
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.maps.model.LatLng
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+
+
+data class DailyWeather(
+    val dateIso: String,     // "2025-10-19"
+    val dayLabel: String,    // "SUN"
+    val tMin: Int,           // rounded
+    val tMax: Int,           // rounded
+    val precipPct: Int,      // 0..100
+    val weatherCode: Int
+)
 
 data class MapState(
     val markers: List<LatLng> = emptyList(),
@@ -19,8 +35,16 @@ data class MapState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val deleteMode: Boolean = false,
+    val weather: List<DailyWeather> = emptyList(),
+    val weatherError: String? = null,
+    val weatherLoading: Boolean = false,
+    val weatherLocationLabel: String? = null,
+    val showWeatherCard: Boolean = false,
+    val selectedMarker: LatLng? = null,
     val addMode: Boolean = false
 )
+
+
 
 class MapViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(MapState())
@@ -98,6 +122,75 @@ class MapViewModel : ViewModel() {
             _uiState.value = _uiState.value.copy(deleteMode = false)
         }
     }
+
+
+    fun fetchWeatherFor(latLng: LatLng) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(weatherLoading = true, weatherError = null)
+            try {
+                val resp = withContext(Dispatchers.IO) {
+                    WeatherApi.service.getWeatherData(
+                        latitude = latLng.latitude,
+                        longitude = latLng.longitude
+                    )
+                }
+
+                val daily = resp.daily
+                val list = if (daily != null) {
+                    val isoFormatter = DateTimeFormatter.ISO_LOCAL_DATE
+                    daily.time.indices.map { i ->
+                        val iso = daily.time[i]
+                        val date = LocalDate.parse(iso, isoFormatter)
+                        DailyWeather(
+                            dateIso = iso,
+                            dayLabel = date.dayOfWeek.name.take(3), // MON/TUE/...
+                            tMin = (daily.tMin.getOrNull(i) ?: 0.0).toInt(),
+                            tMax = (daily.tMax.getOrNull(i) ?: 0.0).toInt(),
+                            precipPct = (daily.precipMax.getOrNull(i) ?: 0),
+                            weatherCode = (daily.weatherCode.getOrNull(i) ?: 0)
+                        )
+                    }
+                } else emptyList()
+
+                val lat = latLng.latitude
+                val lon = latLng.longitude
+                val label = buildString {
+                    append(String.format(Locale.US, "%.2f°%s", kotlin.math.abs(lat), if (lat >= 0) "N" else "S"))
+                    append(" • ")
+                    append(String.format(Locale.US, "%.2f°%s", kotlin.math.abs(lon), if (lon >= 0) "E" else "W"))
+                }
+
+                _uiState.value = _uiState.value.copy(
+                    weather = list,
+                    weatherLoading = false,
+                    weatherLocationLabel = label
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    weatherLoading = false,
+                    weatherError = e.message ?: "Weather fetch failed"
+                )
+            }
+        }
+    }
+
+    fun onMarkerTapped(p: LatLng) {
+        // show the card immediately and start loading weather
+        _uiState.value = _uiState.value.copy(
+            selectedMarker = p,
+            showWeatherCard = true,
+            weatherLoading = true,
+            weatherError = null
+        )
+        fetchWeatherFor(p)  // your existing network call
+    }
+
+    fun hideWeatherCard() {
+        if (_uiState.value.showWeatherCard) {
+            _uiState.value = _uiState.value.copy(showWeatherCard = false)
+        }
+    }
+
 
 
 }
