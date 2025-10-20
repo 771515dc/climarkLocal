@@ -202,7 +202,11 @@ fun MapScreen(
                 FloatingActionButton(
                     modifier = Modifier.size(60.dp),
                     onClick = {
-                        viewModel.hideWeatherCard()  // match behavior: FABs dismiss the card
+                        // Close any open panels/modes (same as other FABs)
+                        viewModel.hideWeatherCard()
+                        viewModel.cancelAddMode()
+                        viewModel.cancelDeleteMode()
+
                         if (uiState.locationPermissionGranted) {
                             val target = uiState.currentLocation
                             if (target != null) {
@@ -211,14 +215,12 @@ fun MapScreen(
                                         CameraUpdateFactory.newLatLngZoom(target, 15f)
                                     )
                                 }
-                                // Optional: also show weather for current location
-                                viewModel.onMarkerTapped(target)
+                                // IMPORTANT: Do NOT call viewModel.onMarkerTapped(target)
+                                // (that line was causing the weather card to pop up)
                             } else {
-                                // Permission granted but no fix yet—try to fetch one
                                 viewModel.getCurrentLocation()
                             }
                         } else {
-                            // Ask for permission if not granted
                             permissionLauncher.launch(
                                 arrayOf(
                                     Manifest.permission.ACCESS_FINE_LOCATION,
@@ -226,7 +228,8 @@ fun MapScreen(
                                 )
                             )
                         }
-                    },
+                    }
+,
                     containerColor = MaterialTheme.colorScheme.background,
                     contentColor = MaterialTheme.colorScheme.onBackground
                 ) {
